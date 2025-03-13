@@ -1,0 +1,229 @@
+---
+title: "Check on physchem properties"
+author: "Caroline Ring"
+date: "2025-03-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(ctxR)
+library(data.table)
+library(ggplot2)
+```
+
+```{r, eval = FALSE}
+ctxR::register_ctx_api_key("<YOUR_API_KEY>")
+```
+
+I noticed in the course of the biosolids SEEM analysis that a couple of chemicals seemed to have bad values for phys-chem properties returned from the CTX APIs: stigamasterol and campasterol, at least. These properties were substantially different on the API than they were on a single-chemical web-based search of the Dashboard.
+
+The problematic properties appeared to be from ACD/Labs (Percepta) QSAR predictions, specifically. They were very far out of range from other chemicals (e.g. Molar Volume of 0.9, when all other chemicals in the NSSS set had molar volumes of 100-1000), such that I did not think the discrepancies were explainable by slight differences in data versions (e.g. a slightly newer version of Percepta on the web vs. the API). It looked to me as though the API was pulling from the wrong field.
+
+Now I will do a systematic comparison of phys-chem properties downloaded from the Dashboard web-based batch search to those retrieved from the API via `ctxR`.
+
+For the web-based batch search, I copied and pasted the DTXSID column from `data/Richman_et_al_2022_SI_Table4_Biosolids Concentration Data from NSSSs.xlsx` into a new Excel spreadsheet, choosing Paste - Paste Special - Skip Blanks to remove blank rows. The resulting file is in `data/CCD-Batch-Search_inputs.xlsx`.
+
+Then I copied and pasted the resulting column of DTXSIDs into the batch search at https://comptox.epa.gov/dashboard/batch-search.
+
+Then I selected Choose Export Options and then chose Excel. Under Enhanced Data Sheets, I checked "Physicochemical Property Values."
+
+The resulting Excel file is in `data/CCD-Batch-Search_2025-03-13_12_33_32.xlsx`.
+
+# Read in batch search data
+
+```{r}
+batch <- readxl::read_excel(path = "data/CCD-Batch-Search_2025-03-13_12_33_32.xlsx",
+                            sheet = "Chemical Properties")
+batch <- as.data.table(batch)
+batch[, VALUE := as.numeric(VALUE)]
+```
+
+# Query API for the same DTXSIDs
+
+```{r}
+chems <- readxl::read_excel(path = "data/CCD-Batch-Search_inputs.xlsx",
+                            col_names = "DTXSID")
+```
+
+```{r}
+api <- ctxR::get_chem_info_batch(DTXSID = chems$DTXSID)
+```
+
+Names map as (batch = api)
+
+DTXSID = dtxsid
+DTXCID  = dtxcid
+TYPE = propType
+NAME = name
+VALUE = value
+UNITS = unit
+SOURCE = source
+DESCRIPTION = description
+
+Rename `api` to match `batch`
+
+```{r}
+api2 <- api[, .(dtxsid,
+                dtxcid,
+                propType,
+                name,
+                value,
+                unit,
+                source,
+                description)]
+setnames(api2, 
+         names(api2),
+         c("DTXSID",
+           "DTXCID",
+           "TYPE",
+           "NAME",
+           "VALUE",
+           "UNITS",
+           "SOURCE",
+           "DESCRIPTION"))
+```
+
+Check sources: Are they identified the same way for both?
+
+```{r}
+setdiff(api2$SOURCE, batch$SOURCE)
+```
+
+```{r}
+setdiff(batch$SOURCE, api2$SOURCE)
+```
+
+
+For `api2`, I think both ACD/Labs and ACD/Labs Consensus map to "Percepta2023.1.2". And "OPERA" maps to "OPERA 2.6."
+
+```{r}
+api2[, SOURCE2 := SOURCE]
+api2[SOURCE %in% c("ACD/Labs",
+                   "ACD/Labs Consensus"),
+     SOURCE2 := "Percepta2023.1.2"]
+api2[SOURCE %in% "OPERA",
+     SOURCE2 := "OPERA 2.6"]
+api2[SOURCE %in% "Li et al. J. Phys. Chem. Ref. Data 32(4): 1545-1590. ",
+     SOURCE2 := "Li et al. J. Phys. Chem. Ref. Data 32(4): 1545-1590."]
+api2[SOURCE %in% "Kurz et al. Chemosphere 38 (1999) 573–586 ",
+     SOURCE2 := "Kurz et al. Chemosphere 38 (1999) 573–586"]
+```
+
+Create corresponding SOURCE2 column for batch
+
+```{r}
+batch[, SOURCE2 := SOURCE]
+```
+
+Now merge on everything except VALUE and SOURCE?
+
+```{r}
+physchem <- merge(api2,
+                  batch,
+                  all.x = TRUE,
+                  all.y = FALSE,
+                  by = setdiff(names(api2),
+                               c("VALUE",
+                                 "SOURCE",
+                                 "UNITS",
+                                 "DESCRIPTION")),
+                  suffixes = c(".api", ".batch"))
+```
+
+Now: plot one vs. the other, by property and by source2.
+
+Subset to QSAR-predicted values
+
+```{r}
+ggplot(physchem[TYPE %in% "predicted"]) +
+  geom_point(aes(x = VALUE.batch,
+                 y = VALUE.api,
+                 color = SOURCE2)) +
+  geom_abline(slope = 1, intercept = 0) +
+  facet_wrap(vars(NAME),
+             scales = "free")
+```
+
+Only a few are way off. Which ones?
+
+```{r}
+physchem[TYPE %in% "predicted" &
+           NAME %in% "Boiling Point" &
+           VALUE.api < 100 & 
+           VALUE.batch > 100, ]
+```
+
+
+```{r}
+physchem[TYPE %in% "predicted" &
+           NAME %in% "Density" &
+           VALUE.api > 300  & 
+           VALUE.batch < 100, ]
+```
+
+```{r}
+physchem[TYPE %in% "predicted" &
+           NAME %in% "Index of Refraction" &
+           VALUE.api > 300  & 
+           VALUE.batch < 100, ]
+```
+
+```{r}
+physchem[TYPE %in% "predicted" &
+           NAME %in% "Molar Refractivity" &
+           VALUE.api <50  & 
+           VALUE.batch > 50, ]
+```
+
+```{r}
+physchem[TYPE %in% "predicted" &
+           NAME %in% "pKa Acidic Apparent" &
+           VALUE.api > 50  & 
+           VALUE.batch < 50, ]
+```
+
+It's the same three every time. DTXSID201016171, DTXSID801009891, DTXSID801015733.
+
+Paul wonders if it is related to the number of characters in the DTXSID.
+
+```{r}
+physchem[, nchar_dtxsid := nchar(DTXSID)]
+tmp <- unique(physchem[, .(DTXSID, nchar_dtxsid)])
+tmp[, .N, by = nchar_dtxsid]
+```
+
+There *are* only three DTXSIDs with 15 characters...
+
+```{r}
+tmp[nchar_dtxsid %in% 15, ]
+```
+
+And yes, those are our problem children.
+
+DTXSID201016171 is anhydrotetracycline
+DTXSID801009891 is campesterol
+DTXSID801015733 is stigmasterol
+
+Create a table of the "bad" values and save it.
+
+```{r}
+tmp <- physchem[DTXSID %in% c("DTXSID201016171",
+                       "DTXSID801009891",
+                       "DTXSID801015733") &
+           SOURCE2 %in% "Percepta2023.1.2",
+         .(DTXSID,
+           NAME,
+           SOURCE.api,
+           SOURCE.batch,
+           VALUE.api,
+           VALUE.batch)]
+
+write.csv(tmp,
+          "data/api_physchem_badvals.csv")
+```
+
