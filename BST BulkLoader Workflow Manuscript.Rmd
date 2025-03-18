@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, eval = FALSE}
 library(tidyverse)
 library(data.table)
 library(httk)
@@ -79,6 +79,50 @@ setnames(NSSS,
          gsub(pattern = "\\.\\.\\.\\d+$",
               replacement = "",
               x = names(NSSS)))
+
+#also read in nutrients sheet
+NSSS2 <- readxl::read_excel(path = 'data/Richman_et_al_2022_SI_Table4_Biosolids Concentration Data from NSSSs.xlsx',
+                                         sheet = 'Nutrient Concentration Data',
+                                         range = 'A2:U5')
+
+NSSS2 <- data.table(NSSS2)
+
+#Rename columns to reflect years
+#1988 
+setnames(NSSS2,
+         names(NSSS2)[5:11],
+         paste("1988",
+               names(NSSS2)[5:11]))
+#2009
+setnames(NSSS2,
+         names(NSSS2)[13:21],
+         paste("2009",
+               names(NSSS2)[13:21]))
+
+NSSS2[, `...12` := NULL]
+
+#remove the "...[number]" suffixes that were originally added during data import
+setnames(NSSS2,
+         names(NSSS2),
+         gsub(pattern = "\\.\\.\\.\\d+$",
+              replacement = "",
+              x = names(NSSS2)))
+
+setnames(NSSS2,
+         names(NSSS2),
+         gsub(x = names(NSSS2),
+              pattern = "1/2 ML",
+              replacement = "1/2 MRL",
+              fixed = TRUE))
+
+setnames(NSSS2,
+         "MasterList Chemical Name",
+          "Chemical Name Reported in Biennial Reviews and Sewage Sludge Surveys")
+
+NSSS <- data.table::rbindlist(list(NSSS,
+                       NSSS2),
+                  use.names = TRUE,
+                  fill = TRUE)
 ```
 # ClassyFire chemical classifications
 
@@ -519,7 +563,7 @@ generate_organic_entry <- function(DTXSID,
   # Get molar volume and molecular weight for diffusivity calculations
   chemical_mw <- as.numeric(chemical_details$monoisotopicMass)
   chemical_mw_ref <- 279
-  chemical_name_notes <- 'CompTox Dashboard chemical details'
+  chemical_mw_notes <- 'CompTox Dashboard chemical details'
   
   #if experimental values available, use them
   chemical_molar_volume <- chemical_info[name %in% 'Molar Volume' &
@@ -968,7 +1012,7 @@ generate_inorganic_entry <- function(DTXSID,
   # Get molar volume and molecular weight for density calculations
   chemical_mw <- as.numeric(chemical_details$monoisotopicMass)
   chemical_mw_ref <- 279
-  chemical_name_notes <- 'CompTox Dashboard chemical details'
+  chemical_mw_notes <- 'CompTox Dashboard chemical details'
   
   chemical_molar_volume <- chemical_info[name %in% 'Molar Volume' &
                                            propType %in% 'experimental',
@@ -1627,7 +1671,12 @@ make_conc_tbl <- function(which_conc = "mean" #or "95th"
               "2001 Mean with Nondetects Set to 1/2 MRL",
               "1988 Mean with Nondetects Set to MRL")
   }else if(which_conc %in% "95th"){
+    #either the non-parameteric or the lognormal one will be NA
+    NSSS_tmp <- copy(NSSS)
+    NSSS_tmp[, ]
+    
     vars <- c("2009 95th Percentile Concentration Estimates with Nondetects Set to 1/2 MRL (Non-Parametric Model)",
+              "2009 95th Percentile Concentration Estimates with Nondetects Set to 1/2 MRL (Lognormal Model)",
               "2001 95th Percentile Concentration Estimate with Nondetects Set to 1/2 MRL",
               "1988 95th Percentile Concentration Estimate with Nondetects Set to MRL")
   }
@@ -1635,23 +1684,55 @@ make_conc_tbl <- function(which_conc = "mean" #or "95th"
   units_vars <- c("2009 Unit",
                   "2001 Unit",
                   "1988 Unit")
+  
   DT_long <- melt(NSSS,
                   id.vars = "DTXSID",
-                  measure.vars = list("conc" = vars,
-                                      "unit" = units_vars),
+                  measure.vars = vars,
                   na.rm = TRUE,
                   variable.factor = FALSE)
   
-  DT_long[, conc_variable := vars[as.integer(variable)]]
+  DT_long[, year := substr(variable,
+                         1,
+                         4)]
   
-  #the first row within each DTXSID will be the most recent
+    #the first row within each DTXSID will be the most recent
   DT_out <- DT_long[, .SD[1], by = DTXSID]
-  DT_long[, variable := NULL]
+  setnames(DT_out,
+         c("variable", "value"),
+         c("conc_variable", "conc"))
+  
+  DT_long_unit <- melt(NSSS,
+                  id.vars = "DTXSID",
+                  measure.vars = units_vars,
+                  na.rm = TRUE,
+                  variable.factor = FALSE)
+  
+    DT_long_unit[, year := substr(variable,
+                         1,
+                         4)]
+    
+    setorder(DT_long_unit,
+             DTXSID,
+             -year)
+    
+    
+  setnames(DT_long_unit,
+         "value",
+         "unit")
+  
+  DT_long_unit[, variable := NULL]
+  
+   #the first row within each DTXSID will be the most recent
+  DT_out_unit <- DT_long_unit[, .SD[1], by = DTXSID]
+  
+    DT_out <- DT_out_unit[DT_out, on = c("DTXSID", "year")]
   
   #convert all to mg/kg units
   DT_out[unit %in% "MG/KG", conc_mgkg := conc]
   DT_out[unit %in% "UG/KG", conc_mgkg := conc * 1e-3]
   DT_out[unit %in% "NG/KG", conc_mgkg := conc * 1e-6]
+  
+  DT_out[, year := NULL]
   
   return(DT_out)
   
@@ -2405,495 +2486,255 @@ Click "View Results" and export the results to Excel. You will need to click "LA
 
 # Analysis of BST results
 
-## Exposures from mean biosolids concentrations
-
-Read in the BST results from the land-application scenario.
-
 ```{r}
-mean_out <- readxl::read_excel("data/BST_results_LAU_mean.XLSX",
+  df_list <- sapply(c("mean",
+           "p95",
+           "ppb"),
+         function(which_conc){
+  this_out <- readxl::read_excel(paste0(
+    "data/BST_Bulk_Upload/",
+    which_conc,
+    "/BST_results_LAU_",
+    which_conc,
+    ".XLSX"),
                                sheet = "Human_Results")
-```
-
-The variable `Value`, for `Health Benchmark == 'Noncancer'` and `Pathway == 'Total Ingestion'`, reflects the Average Daily Dose (ADD) in mg/kg/day. (Usually, this `Value` would reflect the Hazard Quotient or HQ, which is simply the ADD divided by the reference dose (RFD). However, the parameter "RFD" was set equal to 1. This makes the BST output the ADD, instead of the HQ.)
-
-Filter the output data to include only `Receptor %in% 'Adult Farmer'`, `Health Benchmark == 'Noncancer'`, and `Pathway == 'Total Ingestion'`. This focuses the analysis on ADD for adult human receptors.
-
-```{r}
-mean_add <- mean_out %>%
+  
+  #Filter to adult daily dose
+  this_add <- this_out %>%
   dplyr::filter(Receptor %in% 'Adult Farmer' &
                   `Health Benchmark` %in% "Noncancer" &
                   Pathway %in% 'Total Ingestion')
-```
-
-Predicted average daily doses from ingestion pathways span a wide range of values.
-
-```{r}
-ggplot(mean_add) +
-  geom_freqpoly(aes(x = Value,
-                    color = Scenario),
-                 position = "identity",
-                bins = 15,
+  return(this_add)
+         },
+  simplify = FALSE,
+  USE.NAMES = TRUE)
+  
+  df <- dplyr::bind_rows(df_list,
+                         .id = "which_conc")
+  
+  #frequency polygon of ADDs
+  ggplot(df) +
+  geom_freqpoly(aes(x = Value),
+                bins = 30,
                 linewidth = 1) +
+    facet_grid(rows = vars(which_conc),
+               cols = vars(Scenario)) +
   scale_x_log10(guide = "axis_logticks") +
-  scale_color_brewer(palette = "Set2") +
   xlab("BST-predicted total ingestion ADD (adult farmer), mg/kg/day") +
-  ggtitle("NSSS mean concentrations") +
   theme_bw() +
-  theme(legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 12),
-        legend.title = element_blank(),
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 14),
         axis.text = element_text(size = 12),
         axis.title = element_text(size = 12))
-```
 
-Plot chemicals ranked by ADD. Order the chemicals from lowest to highest ADD for the Crop scenario (this is just an arbitrary choice of scenario).
+ggsave(paste0("data/BST_ADD_freqpoly.pdf"))
+ggsave(paste0("data/BST_ADD_freqpoly.png"), dpi = 300)
 
-```{r}
-mean_add_adult_crop <- mean_add %>%
-  dplyr::filter(Receptor %in% 'Adult Farmer' &
-                  Scenario %in% 'Crop') %>%
-  dplyr::arrange(Value) %>%
-  dplyr::mutate(Chemical_fct = factor(`Chemical Name`,
-                                      levels = unique(`Chemical Name`)))
+#Compare concentrations to exposures
+#read in mapping between DTXSID and stripped CASRN
+#pull this from the 1 ppb spreadsheet
+mapping <- readxl::read_excel("C:/Users/cring/BST/curated1ppb.xlsx",
+                   sheet = "Data_Filtering") %>%
+  dplyr::select(c(DTXSID, casrn_stripped))
 
-ggplot(mean_add_adult) +
-  geom_point(aes(x = `Chemical Name`,
-                 y = Value,
-                 color = Scenario)) +
-  scale_x_discrete(limits = mean_add_adult_crop %>% pull(Chemical_fct)) +
+conc_tbl_list <- sapply(c("mean",
+                     "p95",
+                     "ppb"),
+                   function(which_conc){
+                     if(which_conc %in%"mean"){
+                       
+                       this_tbl <- make_conc_tbl(which_conc = "mean") %>%
+                         dplyr::select(DTXSID, conc_mgkg) %>%
+                         left_join(mapping) %>%
+                         dplyr::rename(CAS = casrn_stripped) %>%
+                         dplyr::mutate(CAS = as.numeric(CAS))
+                     }else if(which_conc %in% "p95"){
+                       this_tbl <- make_conc_tbl(which_conc = "95th") %>%
+                         dplyr::select(DTXSID, conc_mgkg) %>%
+                         left_join(mapping) %>%
+                         dplyr::rename(CAS = casrn_stripped) %>%
+                         dplyr::mutate(CAS = as.numeric(CAS))
+                     }else{
+                       this_tbl <- mapping %>%
+                         mutate(conc_mgkg = 1e-3) %>%
+                         rename(CAS = casrn_stripped)
+                     }
+                     
+                     this_tbl <- this_tbl %>%
+                       dplyr::mutate(CAS = as.numeric(CAS))
+                     
+                     return(this_tbl)
+                   },
+simplify = FALSE,
+USE.NAMES = TRUE)
+
+conc_tbl <- dplyr::bind_rows(conc_tbl_list,
+                             .id = "which_conc")
+
+
+
+#get concentration rankings
+conc_tbl <- conc_tbl %>%
+  dplyr::arrange(which_conc,
+                 -conc_mgkg) %>%
+  dplyr::group_by(which_conc) %>%
+  dplyr::mutate(conc_ranking = 1:dplyr::n()) %>%
+  dplyr::ungroup()
+
+#merge with ADD info
+df_conc <- df %>%
+  dplyr::left_join(conc_tbl,
+                   relationship = "many-to-one")
+
+#Regression of log10 ADD on log10 conc.
+df_lm <- df_conc %>%
+  dplyr::filter(!(which_conc %in% "ppb")) %>%
+  dplyr::group_by(which_conc,
+                  Scenario) %>%
+  dplyr::summarise(Rsq = summary(
+    lm(
+      log10(Value) ~ log10(conc_mgkg)
+      )
+    )$r.squared)
+
+write.csv(df_lm,
+          "data/Rsquared_logADD_logconc.csv")
+df_lm <- df_lm %>%
+  dplyr::mutate(label = sprintf("R^2 == %.3f",
+                         Rsq))
+
+#plot ADD vs. concentration
+
+ggplot(df_conc %>%
+         filter(!(which_conc %in% "ppb")),
+       aes(x = conc_mgkg,
+                    y= Value)) +
+  geom_point(shape = 21) +
+    geom_text(data = df_lm,
+            aes(x = 0,
+                y = Inf,
+                label = label),
+            parse = TRUE,
+            hjust = -0.3,
+            vjust = 1.8) +
+  facet_grid(rows = vars(which_conc),
+               cols = vars(Scenario)) +
   scale_y_log10(guide = "axis_logticks") +
-  ylab("ADD, mg/kg/day") +
-  xlab("Chemical") +
-    ggtitle("BST ADDs for NSSS mean conc., LAU scenarios") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank(),
-        panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
-```
+  scale_x_log10(guide = "axis_logticks") +
+  geom_smooth(method = "lm", se = FALSE, color = "gray50") +
+  xlab("Biosolids conc., mg/kg") +
+  ylab("Adult farmer ADD, mg/kg/day") +
+  theme_bw() + 
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 14))
 
-### Comparing LAU scenarios
+ggsave("data/ADD_vs_conc.pdf")
+ggsave("data/ADD_vs_conc.png")
 
-Are exposures consistently higher for one of the LAU scenarios?
-
-To answer this question, produce a scatterplot matrix, plotting ADD for each LAU scenario vs. ADD for each of the other LAU scenarios.
-
-```{r}
-#pivot the data wider so that there are separate columns for ADD for each LAU scenario
-mean_add_wide <- mean_add %>% pivot_wider(id_cols = c(Climate, CAS,
-                                     `Chemical Name`,
-                                     Receptor,
-                                     Pathway,
-                                     `Health Benchmark`),
-                         names_from = Scenario,
-                         values_from = Value)
-
-#Utility function to add an identity line to a `pairs` plot
-my_line <- function(x,y,...){
-    points(x,y,...)
-    abline(a = 0,b = 1,...)
-}
-
-#Create the scatterplot matrix
-pairs(formula = ~ Crop + Pasture + Reclamation,
-      data = mean_add_wide,
-      upper.panel = my_line,
-      lower.panel = NULL,
-      log = "xy",
-      main = "Adult ADDs for NSSS mean conc.")
-```
-
-None of the scenarios yield consistently higher or lower exposures than the others.
-
-### Rankings from high to low ADD for each LAU scenario
-
-```{r}
-rank_crop <- mean_add_adult_crop %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Crop = Value) %>%
-  dplyr::mutate(Crop_Rank = 1:nrow(mean_add_adult_crop))
-
-rank_rec <- mean_add_adult_rec %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Reclamation = Value)  %>%
-  dplyr::mutate(Reclamation_Rank = 1:nrow(mean_add_adult_rec))
-
-rank_pasture <- mean_add_adult_pasture %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Pasture = Value)  %>%
-  dplyr::mutate(Pasture_Rank = 1:1:nrow(mean_add_adult_pasture))
-
-rank_all <- rank_crop %>%
-  full_join(rank_pasture, by = join_by(`Chemical Name`)) %>%
-  full_join(rank_rec, by = join_by(`Chemical Name`))
-```
-
-Produce a table including both rank and dose info
-
-```{r}
-rank_mean <- rank_all %>%
-   dplyr::rename(Crop_ADD = Crop,
-                 Pasture_ADD = Pasture,
-                 Reclamation_ADD = Reclamation) %>%
-  dplyr::mutate(Crop = paste0(sprintf("%.3g",
-                                      Crop_ADD),
-                              "(",
-                              Crop_Rank,
-                              ")"),
-                Pasture = paste0(sprintf("%.3g",
-                                      Pasture_ADD),
-                              "(",
-                              Pasture_Rank,
-                              ")"),
-                Reclamation = paste0(sprintf("%.3g",
-                                      Reclamation_ADD),
-                              "(",
-                              Reclamation_Rank,
-                              ")")) %>%
-  write.csv("data/ADD_rank_mean.csv")
-```
-
-Display the chemicals that were in the top 20 for each LAU scenario.
-
-```{r}
-rank_all %>%
-  filter((Crop_Rank <=20) |
-           (Pasture_Rank <= 20) |
-           (Reclamation_Rank <= 20)) %>%
-  dplyr::select(c(`Chemical Name`,
-                  Crop_Rank,
-                  Pasture_Rank,
-                  Reclamation_Rank)) %>%
-  as.data.frame() %>%
-  knitr::kable()
-```
-
-## Exposures from 95th percentile biosolids concentrations
-
-```{r}
-p95_out <- readxl::read_excel("data/BST_results_LAU_p95.XLSX",
-                               sheet = "Human_Results")
-```
-
-The variable `Value`, for `Health Benchmark == 'Noncancer'` and `Pathway == 'Total Ingestion'`, reflects the Average Daily Dose (ADD) in mg/kg/day. (Usually, this `Value` would reflect the Hazard Quotient or HQ, which is simply the ADD divided by the reference dose (RFD). However, the parameter "RFD" was set equal to 1. This makes the BST output the ADD.)
-
-Filter the output data to include only `Receptor %in% 'Adult Farmer'`, `Health Benchmark == 'Noncancer'`, and `Pathway == 'Total Ingestion'`.
-
-```{r}
-p95_add <- p95_out %>%
-  dplyr::filter(Receptor %in% 'Adult Farmer' &
-                  `Health Benchmark` %in% "Noncancer" &
-                  Pathway %in% 'Total Ingestion')
-```
-
-Predicted average daily doses from ingestion pathways span a wide range of values.
-
-```{r}
-ggplot(p95_add) +
-  geom_freqpoly(aes(x = Value,
-                    color = Scenario),
-                 position = "identity",
-                bins = 15,
-                linewidth = 1) +
-  scale_x_log10() +
-  annotation_logticks(sides = "b") +
-  scale_color_brewer(palette = "Set2") +
-  xlab("BST-predicted total ingestion ADD (adult farmer), mg/kg/day") +
-  ggtitle("Exposures from NSSS 95th pctile biosolids concentrations") +
-  theme_bw() +
-  theme(legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 12),
-        legend.title = element_blank(),
-        axis.text = element_text(size = 12),
-        axis.title = element_text(size = 12))
-```
-
-Plot chemicals ranked by ADD. Order the chemicals from lowest to highest ADD for the Crop scenario (this is just an arbitrary choice of scenario).
-
-```{r}
-p95_add_adult_crop <- p95_add %>%
-  dplyr::filter(Receptor %in% 'Adult Farmer' &
-                  Scenario %in% 'Crop') %>%
-  dplyr::arrange(Value) %>%
-  dplyr::mutate(Chemical_fct = factor(`Chemical Name`,
-                                      levels = unique(`Chemical Name`)))
-
-ggplot(p95_add_adult) +
-  geom_point(aes(x = `Chemical Name`,
-                 y = Value,
-                 color = Scenario)) +
-  scale_x_discrete(limits = p95_add_adult_crop %>% pull(Chemical_fct)) +
+#plot ADD vs. concentration gray-scaled by log Kow
+#get log Kow information
+ this_input <- readxl::read_excel(paste0(
+    "data/BST_Bulk_Upload/",
+    "mean",
+    "/BST_results_LAU_",
+    "mean",
+    ".XLSX"),
+                               sheet = "Run_ChemicalInputs") %>%
+   dplyr::filter(Model_Code %in% "LogKow") %>%
+   dplyr::select(CAS, Value) %>%
+   dplyr::rename(LogKow = Value) %>%
+   dplyr::distinct()
+ 
+ df_conc2 <- df_conc %>%
+   dplyr::left_join(this_input,
+                    by = CAS)
+ 
+ ggplot(df_conc2 %>%
+         filter(!(which_conc %in% "ppb"))) +
+  geom_point(shape = 21,  aes(x = conc_mgkg,
+                    y= Value,
+           color = LogKow)) +
+    geom_text(data = df_lm,
+            aes(x = 0,
+                y = Inf,
+                label = label),
+            parse = TRUE,
+            hjust = -0.3,
+            vjust = 1.8) +
+  facet_grid(rows = vars(which_conc),
+               cols = vars(Scenario)) +
   scale_y_log10(guide = "axis_logticks") +
-  ylab("ADD, mg/kg/day") +
-  xlab("Chemical") +
-  ggtitle("BST ADDs for NSSS 95% conc., LAU scenarios") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank(),
-        panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
-```
+  scale_x_log10(guide = "axis_logticks") +
+   scale_color_distiller(palette = "Greys", trans = "reverse",
+                      guide = guide_colorbar(reverse = TRUE)) +
+  geom_smooth( aes(x = conc_mgkg,
+                    y= Value), method = "lm", se = FALSE, color = "black") +
+  xlab("Biosolids conc., mg/kg") +
+  ylab("Adult farmer ADD, mg/kg/day") +
+  theme_bw() + 
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 14))
 
-### Comparing scenarios
+ggsave("data/ADD_vs_conc_logkow.pdf")
+ggsave("data/ADD_vs_conc_logkow.png")
 
-Are exposures consistently higher for one of the LAU scenarios?
+df_lm2 <- df_conc2 %>%
+    dplyr::filter(!(which_conc %in% "ppb")) %>%
+    dplyr::group_by(which_conc,
+                    Scenario) %>%
+    dplyr::summarise(Rsq = summary(
+        lm(
+            log10(Value) ~ log10(conc_mgkg) + LogKow
+        )
+    )$r.squared)
 
-To answer this question, produce a scatterplot matrix, plotting ADD for each LAU scenario vs. ADD for each of the other LAU scenarios.
+write.csv(df_lm2,
+          "data/Rsquared_logADD_logconc_logKow.csv")
 
-```{r}
-p95_add_wide <-p95_add %>% pivot_wider(id_cols = c(Climate, CAS,
-                                     `Chemical Name`,
-                                     Receptor,
-                                     Pathway,
-                                     `Health Benchmark`),
-                         names_from = Scenario,
-                         values_from = Value)
+#95th percentile to mean concentration
 
-my_line <- function(x,y,...){
-    points(x,y,...)
-    abline(a = 0,b = 1,...)
-}
+df2 <- df_conc %>%
+  distinct(which_conc, `Chemical Name`, DTXSID, conc_mgkg) %>%
+  pivot_wider(id_cols = c("DTXSID", "Chemical Name"),
+              names_from = "which_conc",
+              values_from = "conc_mgkg") 
 
-pairs(formula = ~ Crop + Pasture + Reclamation,
-      data = p95_add_wide,
-      upper.panel = my_line,
-      lower.panel = NULL,
-      log = "xy",
-      main = "Adult ADDs for NSSS 95% conc.")
-```
-
-None of the scenarios yield consistently higher or lower exposures than the others.
-
-### Rankings from high to low ADD for each LAU scenario
-
-```{r}
-rank_crop <- p95_add_adult_crop %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Crop = Value) %>%
-  dplyr::mutate(Crop_Rank = 1:nrow(p95_add_adult_crop))
-
-rank_rec <- p95_add_adult_rec %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Reclamation = Value)  %>%
-  dplyr::mutate(Reclamation_Rank = 1:nrow(p95_add_adult_rec))
-
-rank_pasture <- p95_add_adult_pasture %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Pasture = Value)  %>%
-  dplyr::mutate(Pasture_Rank = 1:1:nrow(p95_add_adult_pasture))
-
-rank_all <- rank_crop %>%
-  full_join(rank_pasture, by = join_by(`Chemical Name`)) %>%
-  full_join(rank_rec, by = join_by(`Chemical Name`))
-```
-
-Produce a table including both rank and dose info
-
-```{r}
-rank_p95 <- rank_all %>%
-   dplyr::rename(Crop_ADD = Crop,
-                 Pasture_ADD = Pasture,
-                 Reclamation_ADD = Reclamation) %>%
-  dplyr::mutate(Crop = paste0(sprintf("%.3g",
-                                      Crop_ADD),
-                              "(",
-                              Crop_Rank,
-                              ")"),
-                Pasture = paste0(sprintf("%.3g",
-                                      Pasture_ADD),
-                              "(",
-                              Pasture_Rank,
-                              ")"),
-                Reclamation = paste0(sprintf("%.3g",
-                                      Reclamation_ADD),
-                              "(",
-                              Reclamation_Rank,
-                              ")")) %>%
-  write.csv("data/ADD_rank_p95.csv")
-    
-```
-
-Display the chemicals that were in the top 20 for each LAU scenario.
-
-```{r}
-rank_all %>%
-  filter((Crop_Rank <=20) |
-           (Pasture_Rank <= 20) |
-           (Reclamation_Rank <= 20)) %>%
-  dplyr::select(c(`Chemical Name`,
-                  Crop_Rank,
-                  Pasture_Rank,
-                  Reclamation_Rank)) %>%
-  as.data.frame() %>%
-  knitr::kable()
-```
-
-Importantly, predicted exposure does *not* imply predicted risk. In order to estimate potential risk, predicted exposures need to be compared to toxicity values (*e.g.*, reference doses).  
-
-## Exposures from 1 ppb biosolids concentrations
-
-Setting the biosolids concentration to 1 ppb for all chemicals allows a relative ranking of exposure potential.
-
-```{r}
-ppb_out <- readxl::read_excel("data/BST_results_LAU_ppb.XLSX",
-                               sheet = "Human_Results")
-```
-
-The variable `Value`, for `Health Benchmark == 'Noncancer'` and `Pathway == 'Total Ingestion'`, reflects the Average Daily Dose (ADD) in mg/kg/day. (Usually, this `Value` would reflect the Hazard Quotient or HQ, which is simply the ADD divided by the reference dose (RFD). However, the parameter "RFD" was set equal to 1. This makes the BST output the ADD.)
-
-Filter the output data to include only `Receptor %in% 'Adult Farmer'`, `Health Benchmark == 'Noncancer'`, and `Pathway == 'Total Ingestion'`.
-
-```{r}
-ppb_add <- ppb_out %>%
-  dplyr::filter(Receptor %in% 'Adult Farmer' &
-                  `Health Benchmark` %in% "Noncancer" &
-                  Pathway %in% 'Total Ingestion')
-```
-
-Predicted average daily doses from ingestion pathways span a wide range of values.
-
-```{r}
-ggplot(ppb_add) +
-  geom_freqpoly(aes(x = Value,
-                    color = Scenario),
-                 position = "identity",
-                bins = 15,
-                linewidth = 1) +
-  scale_x_log10() +
-  annotation_logticks(sides = "b") +
-  scale_color_brewer(palette = "Set2") +
-  xlab("BST-predicted total ingestion ADD (adult farmer), mg/kg/day") +
-  ggtitle("Exposures from 1 ppb biosolids concentrations") +
-  theme_bw() +
-  theme(legend.position = c(0.8,0.8),
-        legend.text = element_text(size = 12),
-        legend.title = element_blank(),
-        axis.text = element_text(size = 12),
-        axis.title = element_text(size = 12))
-```
-
-Plot chemicals ranked by ADD. Order the chemicals from lowest to highest ADD for the Crop scenario (this is just an arbitrary choice of scenario).
-
-```{r}
-ppb_add_adult_crop <- ppb_add %>%
-  dplyr::filter(Receptor %in% 'Adult Farmer' &
-                  Scenario %in% 'Crop') %>%
-  dplyr::arrange(Value) %>%
-  dplyr::mutate(Chemical_fct = factor(`Chemical Name`,
-                                      levels = unique(`Chemical Name`)))
-
-ggplot(ppb_add_adult) +
-  geom_point(aes(x = `Chemical Name`,
-                 y = Value,
-                 color = Scenario)) +
-  scale_x_discrete(limits = ppb_add_adult_crop %>% pull(Chemical_fct)) +
+ggplot(df2,
+       aes(x = mean,
+           y = p95)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope =1)  +
+   geom_abline(intercept = 1, slope =1, linetype = 2)  +
+   geom_abline(intercept = -1, slope =1, linetype = 2)  +
+  xlab("NSSS mean conc., mg/kg dry wt biosolids") +
+  ylab("NSSS 95th pctile conc., mg/kg dry wt biosolids") +
   scale_y_log10(guide = "axis_logticks") +
-  ylab("ADD, mg/kg/day") +
-  xlab("Chemical") +
-  ggtitle("BST ADDs for 1 ppb conc., LAU scenarios") +
-  theme_minimal() +
-  theme(axis.text.x = element_blank(),
-        panel.grid.major.x = element_blank(),
-        panel.grid.minor.x = element_blank())
+  scale_x_log10(guide = "axis_logticks") +
+  theme_bw()
+
+ggsave("data/mean_vs_p95_conc.pdf")
+ggsave("data/mean_vs_p95_conc.png")
+
+
+
+#get rankings of ADD within which_conc and Scenario
+
+df_rank <- df_conc %>%
+  dplyr::arrange(which_conc,
+           Scenario,
+          -Value) %>%
+  dplyr::group_by(which_conc,
+           Scenario) %>%
+  mutate(Rank = 1:n()) %>%
+  ungroup() %>%
+  rename(ADD = Value) %>%
+  select(c(DTXSID, CAS, `Chemical Name`, which_conc, conc_mgkg, conc_ranking, Scenario, ADD, Rank)) %>%
+ tidyr::pivot_wider(id_cols = c(DTXSID, CAS, which_conc, `Chemical Name`, conc_mgkg, conc_ranking),
+              names_from = Scenario,
+              values_from = c(ADD,
+                              Rank))
+
+  write.csv(df_rank, paste0("data/ADD_rank.csv"))
+
 ```
 
-### Comparing scenarios
-
-Are exposures consistently higher for one of the LAU scenarios?
-
-To answer this question, produce a scatterplot matrix, plotting ADD for each LAU scenario vs. ADD for each of the other LAU scenarios.
-
-```{r}
-ppb_add_wide <-ppb_add %>% pivot_wider(id_cols = c(Climate, CAS,
-                                     `Chemical Name`,
-                                     Receptor,
-                                     Pathway,
-                                     `Health Benchmark`),
-                         names_from = Scenario,
-                         values_from = Value)
-
-my_line <- function(x,y,...){
-    points(x,y,...)
-    abline(a = 0,b = 1,...)
-}
-
-pairs(formula = ~ Crop + Pasture + Reclamation,
-      data = ppb_add_wide,
-      upper.panel = my_line,
-      lower.panel = NULL,
-      log = "xy",
-      main = "Adult ADDs for 1 ppb conc.")
-```
-
-None of the scenarios yield consistently higher or lower exposures than the others.
-
-### Rankings from high to low ADD for each LAU scenario
-
-```{r}
-rank_crop <- ppb_add_adult_crop %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Crop = Value) %>%
-  dplyr::mutate(Crop_Rank = 1:nrow(ppb_add_adult_crop))
-
-rank_rec <- ppb_add_adult_rec %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Reclamation = Value)  %>%
-  dplyr::mutate(Reclamation_Rank = 1:nrow(ppb_add_adult_rec))
-
-rank_pasture <- ppb_add_adult_pasture %>%
-  arrange(-Value) %>%
-dplyr::select(`Chemical Name`, Value) %>%
-  dplyr::rename(Pasture = Value)  %>%
-  dplyr::mutate(Pasture_Rank = 1:1:nrow(ppb_add_adult_pasture))
-
-rank_all <- rank_crop %>%
-  full_join(rank_pasture, by = join_by(`Chemical Name`)) %>%
-  full_join(rank_rec, by = join_by(`Chemical Name`))
-```
-
-Produce a table including both rank and dose info
-
-```{r}
-rank_ppb <- rank_all %>%
-   dplyr::rename(Crop_ADD = Crop,
-                 Pasture_ADD = Pasture,
-                 Reclamation_ADD = Reclamation) %>%
-  dplyr::mutate(Crop = paste0(sprintf("%.3g",
-                                      Crop_ADD),
-                              "(",
-                              Crop_Rank,
-                              ")"),
-                Pasture = paste0(sprintf("%.3g",
-                                      Pasture_ADD),
-                              "(",
-                              Pasture_Rank,
-                              ")"),
-                Reclamation = paste0(sprintf("%.3g",
-                                      Reclamation_ADD),
-                              "(",
-                              Reclamation_Rank,
-                              ")")) %>%
-  write.csv("data/ADD_rank_ppb.csv")
-    
-```
-
-Display the chemicals that were in the top 20 for each LAU scenario.
-
-```{r}
-rank_all %>%
-  filter((Crop_Rank <=20) |
-           (Pasture_Rank <= 20) |
-           (Reclamation_Rank <= 20)) %>%
-  dplyr::select(c(`Chemical Name`,
-                  Crop_Rank,
-                  Pasture_Rank,
-                  Reclamation_Rank)) %>%
-  as.data.frame() %>%
-  knitr::kable()
-```
