@@ -1,7 +1,7 @@
 ---
-title: "BST BulkLoader Workflow Clean"
-author: "Paul Kruse"
-date: "2024-01-10"
+title: "BST BulkLoader Workflow"
+author: "Paul Kruse and Caroline Ring"
+date: "2025-03-24"
 output: html_document
 ---
 
@@ -9,7 +9,13 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r, eval = FALSE}
+# Setup 
+
+Ensure your working directory in R is the directory where this R Markdown document lives (using commands `getwd()` to check the current working directory, and `setwd()` to change it if needed).
+
+Load necessary packages. All are available on CRAN except for `ggsankey`.
+
+```{r}
 library(tidyverse)
 library(data.table)
 library(httk)
@@ -19,11 +25,14 @@ library(ggsankey) #use devtools::install_github("davidsjoberg/ggsankey") to inst
 #or if that doesn't work, clone the github repo yourself and use devtools::install_local() to install from the locally-cloned repo
 ```
 
+## Register your CTX API key
+
 To use the `ctxR` package to access EPA's Computational Toxicology and Exposure (CTX)
 APIs, an API key is required. Before continuing, please use `ctxR::register_ctx_api_key()` to register your API key for this R session: in the following command, replace `<YOUR API KEY>` with your actual API key, and then evaluate at the R command line. Please do not paste your actual API key into this document, or anywhere where it might inadvertently be shared with other people.
 
 ```{r, eval = FALSE}
-ctxR::register_ctx_api_key(key = '<YOUR API KEY>')
+ctxR::register_ctx_api_key(key = '<YOUR API KEY>',
+                           write = TRUE)
 ```
 
 # Bulk Uploader Tool template sheets
@@ -124,6 +133,7 @@ NSSS <- data.table::rbindlist(list(NSSS,
                   use.names = TRUE,
                   fill = TRUE)
 ```
+
 # ClassyFire chemical classifications
 
 ClassyFire classifications can be queried from the ClassyFire API, but the InCHiKey is required. Get the InCHiKey for each DTXSID in the NSSS data, using the `ctxR` function `ctxR::get_chemical_details_batch()`.
@@ -1403,7 +1413,7 @@ check_class <- function(DTXSIDs,
   tmp[, 
              chemical_class := dplyr::case_when(kingdom %in% "Organic compounds" ~ "Organic",
                                                kingdom %in% "Inorganic compounds" ~ "Inorganic",
-                                               .default = "Other")]
+                                               .default = "Non-classifiable")]
   
   #return chemical class
   return(tmp$chemical_class)
@@ -1647,16 +1657,16 @@ check_range <- function(entry,
 # Read in Bulk Uploader Tool sheets
 
 ```{r}
-bulkuploader_Notes <- readxl::read_excel(path = '../Data/BST_BulkChemicalImportTool.xlsm',
+bulkuploader_Notes <- readxl::read_excel(path = 'data/BST_BulkChemicalImportTool.xlsm',
                                          sheet = 'Notes')
 
-bulkuploader_Template_Chem_Org <- readxl::read_excel(path = '../Data/BST_BulkChemicalImportTool.xlsm',
+bulkuploader_Template_Chem_Org <- readxl::read_excel(path = 'data/BST_BulkChemicalImportTool.xlsm',
                                          sheet = 'Template_Chem_Org')
-bulkuploader_Template_Chem_Inorg <- readxl::read_excel(path = '../Data/BST_BulkChemicalImportTool.xlsm',
+bulkuploader_Template_Chem_Inorg <- readxl::read_excel(path = 'data/BST_BulkChemicalImportTool.xlsm',
                                          sheet = 'Template_Chem_Inorg')
-bulkuploader_Template_Eco <- readxl::read_excel(path = '../Data/BST_BulkChemicalImportTool.xlsm',
+bulkuploader_Template_Eco <- readxl::read_excel(path = 'data/BST_BulkChemicalImportTool.xlsm',
                                          sheet = 'Template_Eco')
-bulkuploader_References <- readxl::read_excel(path = '../Data/BST_BulkChemicalImportTool.xlsm',
+bulkuploader_References <- readxl::read_excel(path = 'data/BST_BulkChemicalImportTool.xlsm',
                                          sheet = 'References')
 ```
 
@@ -1963,7 +1973,7 @@ generate_tbls <- function(DTXSIDs,
                                       levels = c("preloaded",
                                       "Inorganic",
                                                  "Organic",
-                                                 "Other",
+                                                 "Non-classifiable",
                                                  "exclude"))]
   out_tbl2[, is_DLC := factor(is_DLC,
                               levels = c("preloaded",
@@ -2233,22 +2243,22 @@ prepared1ppb <- list('Notes' = bulkuploader_Notes,
 
 # Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared1ppb,
-                    path = "C:/Users/cring/BST/curated1ppb.xlsx")
+                    path = "results/curated1ppb.xlsx")
 
 my_plot1ppb <- make_sankey(filt_dt = all_entries1ppb$Data_Filtering,
                        use_has_conc = FALSE,
                        use_color = FALSE)
 
-ggsave( "data/BST_sankey_1ppb.pdf",
+ggsave( "results/BST_sankey_1ppb.pdf",
         my_plot1ppb,
        height = 5,
-       width = 8,
+       width = 9,
        units = "in")
 
-ggsave( "data/BST_sankey_1ppb.png",
+ggsave( "results/BST_sankey_1ppb.png",
         my_plot1ppb,
        height = 5,
-       width = 8,
+       width = 9,
        units = "in",
        dpi = 300)
 ```
@@ -2276,22 +2286,22 @@ prepared_mean <- list('Notes' = bulkuploader_Notes,
 
 # Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared_mean,
-                    path = "C:/Users/cring/BST/NSSSmean.xlsx")
+                    path = "results/NSSSmean.xlsx")
 
  my_plot_mean <- make_sankey(filt_dt = all_entries_mean$Data_Filtering,
                        use_has_conc = TRUE,
                        use_color = FALSE)
 
-ggsave("data/BST_sankey_NSSSmean.pdf",
+ggsave("results/BST_sankey_NSSSmean.pdf",
        my_plot_mean, 
        height = 5,
-       width = 8,
+       width = 9,
        units = "in")
 
-ggsave("data/BST_sankey_NSSSmean.png",
+ggsave("results/BST_sankey_NSSSmean.png",
        my_plot_mean, 
        height = 5,
-       width = 8,
+       width = 9,
        units = "in")
 ```
 
@@ -2317,22 +2327,22 @@ prepared_95 <- list('Notes' = bulkuploader_Notes,
 
 #Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared_95,
-                    path = "C:/Users/cring/BST/NSSS95.xlsx")
+                    path = "results/NSSS95.xlsx")
 
  my_plot_95 <- make_sankey(filt_dt = all_entries_95$Data_Filtering,
                        use_has_conc = TRUE,
                        use_color = FALSE)
 
-ggsave("data/BST_sankey_NSSS95th.pdf",
+ggsave("results/BST_sankey_NSSS95th.pdf",
        my_plot_95, 
        height = 5,
-       width = 8,
+       width = 9,
        units = "in")
 
-ggsave("data/BST_sankey_NSSS95th.png",
+ggsave("results/BST_sankey_NSSS95th.png",
        my_plot_95, 
        height = 5,
-       width = 8,
+       width = 9,
        units = "in")
 ```
 
@@ -2342,35 +2352,39 @@ Operating system requirements: Windows 7 or later.
 
 Microsoft Access is required: any 32- or 64-bit installation of Access 2013 or later.
 
-## Directory setup
+## Set up the BST
 
-Create a directory with as short a pathname as possible. The BST must be run in a directory with a pathname of 48 characters or less, according to the BST User Guide.
+Download the Biosolids Screening Tool from [https://www.epa.gov/biosolids/risk-assessment-pollutants-sewage-sludge](https://www.epa.gov/biosolids/risk-assessment-pollutants-sewage-sludge). (Direct link: [https://www.epa.gov/system/files/other-files/2023-03/biosolids-screening-tool.zip](https://www.epa.gov/system/files/other-files/2023-03/biosolids-screening-tool.zip).)
 
-This probably means you need to create the directory close to the root of `C:\`. For example, Dr. Kruse created the directory at `C:\Users\pkruse\BST`.
+Before unzipping the BST, create a directory with as short a pathname as possible. The BST must be run in a directory with a pathname of 48 characters or less, according to the BST User Guide. This probably means you need to create the directory close to the root of `C:\`. For example, Dr. Kruse created the directory at `C:\Users\pkruse\BST`.
 
-Within this directory, create one subdirectory for each set of input concentrations: 1 ppb; NSSS mean; and NSSS 95th percentile. Name them (for example) `ppb`, `mean`, and `p95`, respectively, to keep track of which is which.
+Unzip the BST download into your short-pathname directory. A new folder called "BST" will appear.
 
-Within each of these subdirectories, copy and paste the contents of `data/BST_Bulk_Upload_clean`. (You don't need to copy and paste the `HELP` folder every time, but you do need to copy and paste the other directories: `HWIR`, `RISK_RESULTS`, `SOURCE_RESULTS`, `VVWM`.)
+Within the short-pathname directory, create one subdirectory for each set of input concentrations: 1 ppb; NSSS mean; and NSSS 95th percentile. Name them (for example) `ppb`, `mean`, and `p95`, respectively, to keep track of which is which.
 
-## Placing the Bulk Upload worksheet (output of the BST Workflow)
+Within each of these subdirectories, copy and paste the *contents* of the `BST` folder. You don't need to copy and paste the `HELP` folder every time, but you do need to copy and paste the other directories: `HWIR`, `RISK_RESULTS`, `SOURCE_RESULTS`, `VVWM`. These directories contain files that the Microsoft Access implementation of the BST needs in order to run. 
 
-Now, copy and paste the Bulk Upload workbooks generated by the BST Workflow into their corresponding folders. Copy and paste `curated1.xlsx` into `ppb`; `NSSSmean.xlsx` into `mean`; and `NSSS95th.xlsx` into `p95`.
+The MS Access implementation of the BST itself lives in the `.mdb` file. You do not need to copy and paste the `.mdb` file; it will be replaced in the next step anyway.
+
+## Set up the version of the BST with bulk upload capabilities
+
+The MS Access implementation of the BST downloaded from the URL above does not include bulk upload capabilities. To run this analysis, you will need to get the version with bulk upload capabilities. 
+
+To do this, download the Supplemental Material associated with the manuscript  "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al., 2025). There is a file in that Supplemental Material named `BST_BulkUpload.mdb`. This is the version of the BST with bulk upload capabilities.
+
+Now, within each subdirectory (`mean`, `p95`, and `ppb`), make a new copy of the file `BST_BulkUpload.mdb`.
+
+Optionally, you may want to rename these files to make it clear which subdirectory they are associated with, e.g., as `BST_BulkUpload_mean.mdb`, `BST_BulkUpload_p95.mdb`, and `BST_BulkUpload_ppb.mdb`.
+
+## Place the Bulk Upload worksheet (output of the BST Workflow)
+
+Now, copy and paste the Bulk Upload workbooks generated by the BST Workflow into their corresponding folders. By default, the above code will have saved them in the `results/` subdirectory that should be alongside this R Markdown document in the current R working directory. Copy and paste `results/curated1.xlsx` into `ppb`; `results/NSSSmean.xlsx` into `mean`; and `results/NSSS95th.xlsx` into `p95`.
 
 Within each of the subdirectories, rename the `.xlsx` file to `ChemicalImport.xlsx`. The BST requires that the bulk upload file have this exact filename.
 
-## Setting up the BST runs
+## Set up the BST runs
 
-Within each subdirectory (`mean`, `p95`, and `ppb`), make a copy of the file `BST_v1-02m-rfd1_clean.mdb`: click to select it; hit Ctrl + C, and then hit Ctrl + V. This will create a new file called `BST_v1-02m-rfd1_clean - Copy.mdb`. 
-
-Rename this file to reflect whichever subdirectory it is in (right-click on the file and select "Rename", or left-click once on the file; then type the new name).
-
-Within the `mean` subdirectory, rename `BST_v1-02m-rfd1_clean - Copy.mdb` to `BST_v1-02m-rfd1_nsssmean_clean.mdb`.
-
-Within the `p95` subdirectory, rename `BST_v1-02m-rfd1_clean - Copy.mdb` to `BST_v1-02m-rfd1_nsssmean_clean.mdb`.
-
-Within the `ppb` subdirectory, rename `BST_v1-02m-rfd1_clean - Copy.mdb` to `BST_v1-02m-rfd1_ppb_clean.mdb`.
-
-Now, choose a subdirectory to start with: for example, the `mean` subdirectory. Double-click on the file you just created and renamed, to open it in Microsoft Access.
+Now, choose a subdirectory to start with: for example, the `mean` subdirectory. Double-click on the `.mdb` file you just created to open it in Microsoft Access.
 
 You may receive a pop-up message saying "The active content in this file is blocked. Review your Trust Center settings or contact your IT administrator." Just click OK.
 
@@ -2382,22 +2396,23 @@ Next, you will see a window titled "Biosolids Tool (Version 1.02) - Main Menu." 
 
 You will see a window titled "Configure Model." At the top, it shows several tabs: Scenarios, Chemicals, Human Exposure, Ecological Exposure, and Inputs.
 
-Click on the "Chemicals" tab (this should be the second tab from the left, after "Scenarios"). You will now see the pre-loaded chemicals.
+Click on the "Chemicals" tab (this should be the second tab from the left, after "Scenarios"). You will now see the pre-loaded chemicals. 
 
-### Set pre-loaded reference doses to 1 
+Also, make sure you are looking at the version of the BST that includes bulk-upload capabilities: **without clicking any buttons**, look at the column of buttons on the left and check to make sure that you *see* a button labeled "Bulk Import Chemicals" (**do not click it yet**).
 
-In the version of the BST file `BST_v1-02m-rfd1_clean.mdb`, we have set CSForal, IUR, RfC, and RfD equal to 1 for all pre-loaded chemicals. This makes it so that all the "risk" and "hazard quotient" values output by the BST actually represent exposure doses or concentrations. This is the only way to get the BST to output average daily dose that is the total of all ingestion pathways or inhalation pathways. 
+### Manually edit the hazard/toxicity values for the pre-loaded chemicals 
 
-If you want the original pre-loaded values for CSForal, IUR, RfC, and RfD, they are still populated in `BST_v1-02m.mdb`.
+Manually edit the hazard/toxicity values for the pre-loaded chemicals: set CSForal, IUR, RfC, and RfD equal to 1 for all pre-loaded chemicals. This makes it so that all the "risk" and "hazard quotient" values output by the BST actually represent exposure doses or concentrations. This is the only way to get the BST to output average daily dose that is the total of all ingestion pathways or inhalation pathways. 
 
+If you want the original pre-loaded values for CSForal, IUR, RfC, and RfD, they are still populated in the original file `BST_BulkUpload.mdb`.
 
 ### Edit pre-loaded biosolids concentrations
 
-In the subdirectory `ppb`, for simulations with 1 ppb biosolids concentrations, you will need to edit the preloaded chemicals so that `CTPWasteDry` takes a value of $1 \times 10^{-3}$ mg/kg (equivalent to 1 ppb). This has already been done in the version of the file named `BST_v1-02m-rfd1_ppb_clean.mdb`.
+In the subdirectory `ppb`, for simulations with 1 ppb biosolids concentrations, you will need to edit the preloaded chemicals so that `CTPWasteDry` takes a value of $1 \times 10^{-3}$ mg/kg (equivalent to 1 ppb).
 
-When running simulations with mean NSSS biosolids concentrations, you will need to edit the preloaded chemicals so that `CTPWasteDry` reflects the mean NSSS concentration. This has already been done in the version of the file named `BST_v1-02m-rfd1_nsssmean_clean.mdb`.
+When running simulations with mean NSSS biosolids concentrations, you will need to edit the preloaded chemicals so that `CTPWasteDry` reflects the mean NSSS concentration.
 
-When running simulations with 95th percentile NSSS biosolids concentrations, you do *not* need to edit the preloaded chemicals. For the preloaded chemicals, `CTPWasteDry` by default reflects the 95th percentile NSSS concentration, except for a few chemicals specified in the next section. This has been confirmed in the version of the file named `BST_v1-02m-rfd1_nsss95_clean.mdb`.
+When running simulations with 95th percentile NSSS biosolids concentrations, you do *not* need to edit the preloaded chemicals. For the preloaded chemicals, `CTPWasteDry` by default reflects the 95th percentile NSSS concentration, except for a few chemicals specified in the next section.
 
 ### De-select pre-loaded chemicals that do not have NSSS mean or 95th percentile concentrations
 
@@ -2419,17 +2434,17 @@ Here is the list of chemicals that should be deselected:
 - Selenium (VI)
 - Sulfathiazole
 
-These chemicals should be deselected when you are running simulations with mean or 95th percentile biosolids concentrations. Their `CTPWasteDry` values have been manually set to 1e-15 in `mean/BST_v1-02m-rfd1_nsssmean_clean.mdb` and `p95/BST_v1-02m-rfd1_clean_nsss95.mdb`, so that in case you forget to de-select them, their biosolids concentrations will be set low enough that they should not rank in any prioritization.
+These chemicals should be deselected when you are running simulations with mean or 95th percentile biosolids concentrations.
 
 ## Performing the Bulk Import
 
 First, save the BST file with only the preloaded chemicals, including any edits you have made to the preloaded chemicals, and close out of it.
 
-We highly recommend keeping a "clean" version of the BST file as it was just before you performed the bulk import. This is because **you cannot delete or overwrite data for any chemicals once they are imported**. If you realize that you need to change something in the BST Workflow and re-generate new Bulk Upload worksheets with new data, then it will be much easier if you can simply make a new copy of the file and re-do the bulk import with the new workshets.
+We highly recommend keeping a "clean" version of the BST file as it was just before you performed the bulk import, including any edits that you have made manually to the pre-loaded chemicals. This is because **you cannot delete or overwrite data for any chemicals once they are imported**. If you realize that you need to change something in the BST Workflow and re-generate new Bulk Upload worksheets with new data, then it will be much easier if you can simply make a new copy of the file and re-do the bulk import with the new workshets.
 
-Next, create a copy of the "clean" file. For example, in `data/mean`, copy and paste the file `BST_v1-02m-rfd1_nsssmean_clean.mdb`. Rename the new copy with a name ending in `_bulk.mdb`. For example, in `data/mean`, rename the file `BST_v1-02m-rfd1_nsssmean_bulk.mdb`.
+Next, create a copy of the "clean" file, and rename it. You can use whatever name you like, as long as it fits into the 48-character path name length limit.
 
-Open this Access file. This is where you will perform the bulk upload.
+Open this newly-renamed Access file. This is where you will perform the bulk upload.
 
 Go to the "Chemicals" tab. On the left, you will see several buttons arranged vertically. Find the button that says "Bulk Import Chemicals." (You may need to scroll down inside this window before this button is visible.)
 
@@ -2484,7 +2499,27 @@ When the simulation is done, you will see a new pop-up window inside the BST tha
 
 Click "View Results" and export the results to Excel. You will need to click "LAU Results" and export, then click "Surface Disposal Results" and export; you can't export both at once.
 
+Rename the exported Excel workbook files. for the NSSS mean runs for the LAU scenarios, you might want to name the file "BST_results_LAU_mean.xlsx."
+
+## Moving the BST run results for analysis
+
+Copy and paste the exported BST result spreadsheets into the `results/` subdirectory that should be in the same directory alongside this R Markdown file.
+
+That directory already contains outputs from the BST runs performed for "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al. 2025). The output file for the NSSS mean concentration scenario is in `results/BST_results_LAU_mean.xlsx`; the output file for the NSSS 95th percentile concentration scenario is in `results/BST_results_LAU_mean_p95.xlsx`; and the output file for the 1 ppb concentration scenario is in `results/BST_results_LAU_mean_ppb.xlsx`.
+
+The following code refers to those pre-existing output files.
+
 # Analysis of BST results
+
+Make an `analysis/` directory to hold the results of the analysis, if it does not already exist.
+
+```{r}
+if(!dir.exists("analysis")){
+  mkdir("analysis")
+}
+```
+
+Read in all output data.
 
 ```{r}
   df_list <- sapply(c("mean",
@@ -2492,9 +2527,7 @@ Click "View Results" and export the results to Excel. You will need to click "LA
            "ppb"),
          function(which_conc){
   this_out <- readxl::read_excel(paste0(
-    "data/BST_Bulk_Upload/",
-    which_conc,
-    "/BST_results_LAU_",
+    "results/BST_results_LAU_",
     which_conc,
     ".XLSX"),
                                sheet = "Human_Results")
@@ -2511,6 +2544,11 @@ Click "View Results" and export the results to Excel. You will need to click "LA
   
   df <- dplyr::bind_rows(df_list,
                          .id = "which_conc")
+```
+  
+Plot frequency polygons (like histograms) for the adult farmer ADDs, under the three LAU scenarios and the three biosolids concentration scenarios.
+
+```{r}
   
   #frequency polygon of ADDs
   ggplot(df) +
@@ -2524,16 +2562,27 @@ Click "View Results" and export the results to Excel. You will need to click "LA
   theme_bw() +
   theme(strip.background = element_blank(),
         strip.text = element_text(size = 14),
+        strip.text.y.right = element_text(size = 14,
+                                          angle = 0),
         axis.text = element_text(size = 12),
         axis.title = element_text(size = 12))
 
-ggsave(paste0("data/BST_ADD_freqpoly.pdf"))
-ggsave(paste0("data/BST_ADD_freqpoly.png"), dpi = 300)
+ggsave(paste0("analysis/BST_ADD_freqpoly.pdf"),
+        width = 9.75,
+       height = 5.4)
+ggsave(paste0("analysis/BST_ADD_freqpoly.png"),
+       width = 9.75,
+       height = 5.4,
+       units = "in",
+       dpi = 300)
+```
 
-#Compare concentrations to exposures
+Compare biosolids concentrations to adult farmer ADDs for each LAU scenario and each biosolids concentration scenario. Make plots and run linear regression (on a log10-log10 scale).
+
+```{r}
 #read in mapping between DTXSID and stripped CASRN
 #pull this from the 1 ppb spreadsheet
-mapping <- readxl::read_excel("C:/Users/cring/BST/curated1ppb.xlsx",
+mapping <- readxl::read_excel("results/curated1ppb.xlsx",
                    sheet = "Data_Filtering") %>%
   dplyr::select(c(DTXSID, casrn_stripped))
 
@@ -2541,7 +2590,7 @@ conc_tbl_list <- sapply(c("mean",
                      "p95",
                      "ppb"),
                    function(which_conc){
-                     if(which_conc %in%"mean"){
+                     if(which_conc %in% "mean"){
                        
                        this_tbl <- make_conc_tbl(which_conc = "mean") %>%
                          dplyr::select(DTXSID, conc_mgkg) %>%
@@ -2578,7 +2627,7 @@ conc_tbl <- conc_tbl %>%
   dplyr::arrange(which_conc,
                  -conc_mgkg) %>%
   dplyr::group_by(which_conc) %>%
-  dplyr::mutate(conc_ranking = 1:dplyr::n()) %>%
+  dplyr::mutate(conc_rank = 1:dplyr::n()) %>%
   dplyr::ungroup()
 
 #merge with ADD info
@@ -2598,7 +2647,7 @@ df_lm <- df_conc %>%
     )$r.squared)
 
 write.csv(df_lm,
-          "data/Rsquared_logADD_logconc.csv")
+          "analysis/Rsquared_logADD_logconc.csv")
 df_lm <- df_lm %>%
   dplyr::mutate(label = sprintf("R^2 == %.3f",
                          Rsq))
@@ -2628,26 +2677,37 @@ ggplot(df_conc %>%
   theme(strip.background = element_blank(),
         strip.text = element_text(size = 14))
 
-ggsave("data/ADD_vs_conc.pdf")
-ggsave("data/ADD_vs_conc.png")
+ggsave("analysis/ADD_vs_conc.pdf",
+       width = 9.75,
+       height = 5.4,
+       units = "in")
+ggsave("analysis/ADD_vs_conc.png",
+        width = 9.75,
+       height = 5.4,
+       units = "in",
+       dpi = 300)
+```
+
+Add Log Kow to the regression of adult farmer ADD on concentration (by LAU scenario and by biosolids concentration scenario).
+
+```{r}
 
 #plot ADD vs. concentration gray-scaled by log Kow
 #get log Kow information
- this_input <- readxl::read_excel(paste0(
-    "data/BST_Bulk_Upload/",
-    "mean",
-    "/BST_results_LAU_",
-    "mean",
-    ".XLSX"),
-                               sheet = "Run_ChemicalInputs") %>%
-   dplyr::filter(Model_Code %in% "LogKow") %>%
-   dplyr::select(CAS, Value) %>%
-   dplyr::rename(LogKow = Value) %>%
-   dplyr::distinct()
+#this will be pulled from the mean results workbook,
+#but it doesn't matter which results workbook we use
+this_input <- readxl::read_excel(
+  "results/BST_results_LAU_mean.XLSX",
+  sheet = "Run_ChemicalInputs") %>%
+  dplyr::filter(Model_Code %in% "LogKow") %>%
+  dplyr::select(CAS, Value) %>%
+  dplyr::rename(LogKow = Value) %>%
+  dplyr::distinct()
  
  df_conc2 <- df_conc %>%
    dplyr::left_join(this_input,
-                    by = CAS)
+                    by = "CAS") %>%
+   dplyr::mutate(LogKow = as.numeric(LogKow))
  
  ggplot(df_conc2 %>%
          filter(!(which_conc %in% "ppb"))) +
@@ -2675,8 +2735,14 @@ ggsave("data/ADD_vs_conc.png")
   theme(strip.background = element_blank(),
         strip.text = element_text(size = 14))
 
-ggsave("data/ADD_vs_conc_logkow.pdf")
-ggsave("data/ADD_vs_conc_logkow.png")
+ggsave("analysis/ADD_vs_conc_logkow.pdf",
+        width = 9.75,
+       height = 5.4)
+ggsave("analysis/ADD_vs_conc_logkow.png",
+       width = 9.75,
+       height = 5.4,
+       units = "in",
+       dpi = 300)
 
 df_lm2 <- df_conc2 %>%
     dplyr::filter(!(which_conc %in% "ppb")) %>%
@@ -2689,36 +2755,12 @@ df_lm2 <- df_conc2 %>%
     )$r.squared)
 
 write.csv(df_lm2,
-          "data/Rsquared_logADD_logconc_logKow.csv")
+          "analysis/Rsquared_logADD_logconc_logKow.csv")
+```
 
-#95th percentile to mean concentration
+Get rankings of chemicals by adult farmer ADD within LAU scenario and within biosolids concentration scenario.
 
-df2 <- df_conc %>%
-  distinct(which_conc, `Chemical Name`, DTXSID, conc_mgkg) %>%
-  pivot_wider(id_cols = c("DTXSID", "Chemical Name"),
-              names_from = "which_conc",
-              values_from = "conc_mgkg") 
-
-ggplot(df2,
-       aes(x = mean,
-           y = p95)) +
-  geom_point() +
-  geom_abline(intercept = 0, slope =1)  +
-   geom_abline(intercept = 1, slope =1, linetype = 2)  +
-   geom_abline(intercept = -1, slope =1, linetype = 2)  +
-  xlab("NSSS mean conc., mg/kg dry wt biosolids") +
-  ylab("NSSS 95th pctile conc., mg/kg dry wt biosolids") +
-  scale_y_log10(guide = "axis_logticks") +
-  scale_x_log10(guide = "axis_logticks") +
-  theme_bw()
-
-ggsave("data/mean_vs_p95_conc.pdf")
-ggsave("data/mean_vs_p95_conc.png")
-
-
-
-#get rankings of ADD within which_conc and Scenario
-
+```{r}
 df_rank <- df_conc %>%
   dplyr::arrange(which_conc,
            Scenario,
@@ -2728,13 +2770,13 @@ df_rank <- df_conc %>%
   mutate(Rank = 1:n()) %>%
   ungroup() %>%
   rename(ADD = Value) %>%
-  select(c(DTXSID, CAS, `Chemical Name`, which_conc, conc_mgkg, conc_ranking, Scenario, ADD, Rank)) %>%
- tidyr::pivot_wider(id_cols = c(DTXSID, CAS, which_conc, `Chemical Name`, conc_mgkg, conc_ranking),
+  select(c(DTXSID, CAS, `Chemical Name`, which_conc, conc_mgkg, conc_rank, Scenario, ADD, Rank)) %>%
+  rename(Adult_Farmer_ADD = ADD) %>%
+ tidyr::pivot_wider(id_cols = c(DTXSID, CAS, which_conc, `Chemical Name`, conc_mgkg, conc_rank),
               names_from = Scenario,
-              values_from = c(ADD,
+              values_from = c(Adult_Farmer_ADD,
                               Rank))
 
-  write.csv(df_rank, paste0("data/ADD_rank.csv"))
-
+  write.csv(df_rank, "analysis/ADD_rank.csv")
 ```
 
