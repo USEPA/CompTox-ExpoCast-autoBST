@@ -2362,15 +2362,13 @@ Unzip the BST download into your short-pathname directory. A new folder called "
 
 Within the short-pathname directory, create one subdirectory for each set of input concentrations: 1 ppb; NSSS mean; and NSSS 95th percentile. Name them (for example) `ppb`, `mean`, and `p95`, respectively, to keep track of which is which.
 
-Within each of these subdirectories, copy and paste the *contents* of the `BST` folder. You don't need to copy and paste the `HELP` folder every time, but you do need to copy and paste the other directories: `HWIR`, `RISK_RESULTS`, `SOURCE_RESULTS`, `VVWM`. These directories contain files that the Microsoft Access implementation of the BST needs in order to run. 
+Within each of these subdirectories, copy and paste the *contents* of the `BST` folder. You don't need to copy and paste the `HELP` folder every time, but you do need to copy and paste the other directories: `HWIR`, `RISK_RESULTS`, `SOURCE_RESULTS`, `VVWM`. These directories contain helper files that the Microsoft Access implementation of the BST needs in order to run. 
 
 The MS Access implementation of the BST itself lives in the `.mdb` file. You do not need to copy and paste the `.mdb` file; it will be replaced in the next step anyway.
 
 ## Set up the version of the BST with bulk upload capabilities
 
-The MS Access implementation of the BST downloaded from the URL above does not include bulk upload capabilities. To run this analysis, you will need to get the version with bulk upload capabilities. 
-
-To do this, download the Supplemental Material associated with the manuscript  "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al., 2025). There is a file in that Supplemental Material named `BST_BulkUpload.mdb`. This is the version of the BST with bulk upload capabilities.
+The MS Access implementation of the BST downloaded from the URL above does not include bulk upload capabilities. The file `BST_BulkUpload.mdb`, in the same directory as this R Markdown file, is the version of the BST with bulk upload capabilities. 
 
 Now, within each subdirectory (`mean`, `p95`, and `ppb`), make a new copy of the file `BST_BulkUpload.mdb`.
 
@@ -2414,7 +2412,7 @@ When running simulations with mean NSSS biosolids concentrations, you will need 
 
 When running simulations with 95th percentile NSSS biosolids concentrations, you do *not* need to edit the preloaded chemicals. For the preloaded chemicals, `CTPWasteDry` by default reflects the 95th percentile NSSS concentration, except for a few chemicals specified in the next section.
 
-### De-select pre-loaded chemicals that do not have NSSS mean or 95th percentile concentrations
+## De-select pre-loaded chemicals that do not have NSSS mean or 95th percentile concentrations
 
 When running simulations with mean or 95th percentile biosolids concentrations, there are some preloaded chemicals that do not have an NSSS mean or 95th percentile. All except a few of these were measured in NSSS, but have too few detects to compute a mean or 95th percentile. 
 
@@ -2461,7 +2459,7 @@ Now, choose the model inputs you want to use on the other tabs. Please see the B
 To reproduce our simulations, make the following selections:
 
 ### "Scenarios" tab
-On the "Scenarios" tab, where it says "Select Unit Type," check the box for "LAU" and "Surface Disposal." Where it says "Select Climate", click the radio button for "Average." Under "Land Application Options", where it says "Select Scenario," check the boxes for "Crop," "Pasture," and "Reclamation." The dry application rates should take their default values: 10 for Crop, 10 for Pasture, 50 for Reclamation. Under "Surface Disposal Options," where it says "Liner Types", check all three boxes ("No liner," "Clay liner," and "Composite liner").
+On the "Scenarios" tab, where it says "Select Unit Type," check the box for "LAU." Where it says "Select Climate", click the radio button for "Average." Under "Land Application Options", where it says "Select Scenario," check the boxes for "Crop," "Pasture," and "Reclamation." The dry application rates should take their default values: 10 for Crop, 10 for Pasture, 50 for Reclamation. 
 
 ### "Chemicals" tab
 
@@ -2497,15 +2495,15 @@ Optionally, you can avoid this minor annoyance by running the BST at a time when
 
 When the simulation is done, you will see a new pop-up window inside the BST that says "Done!" Click OK.
 
-Click "View Results" and export the results to Excel. You will need to click "LAU Results" and export, then click "Surface Disposal Results" and export; you can't export both at once.
+Click "View Results", click "LAU Results," and export the results to Excel.
 
-Rename the exported Excel workbook files. for the NSSS mean runs for the LAU scenarios, you might want to name the file "BST_results_LAU_mean.xlsx."
+Rename the exported Excel workbook files. For example, for the NSSS mean runs for the LAU scenarios, you might want to name the file "BST_results_LAU_mean.xlsx."
 
 ## Moving the BST run results for analysis
 
 Copy and paste the exported BST result spreadsheets into the `results/` subdirectory that should be in the same directory alongside this R Markdown file.
 
-That directory already contains outputs from the BST runs performed for "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al. 2025). The output file for the NSSS mean concentration scenario is in `results/BST_results_LAU_mean.xlsx`; the output file for the NSSS 95th percentile concentration scenario is in `results/BST_results_LAU_mean_p95.xlsx`; and the output file for the 1 ppb concentration scenario is in `results/BST_results_LAU_mean_ppb.xlsx`.
+That directory already contains the exported BST result spreadsheets from the BST runs performed for "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al. 2025). The output file for the NSSS mean concentration scenario is in `results/BST_results_LAU_mean.xlsx`; the output file for the NSSS 95th percentile concentration scenario is in `results/BST_results_LAU_mean_p95.xlsx`; and the output file for the 1 ppb concentration scenario is in `results/BST_results_LAU_mean_ppb.xlsx`.
 
 The following code refers to those pre-existing output files.
 
