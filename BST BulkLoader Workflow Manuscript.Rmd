@@ -141,14 +141,24 @@ NSSS <- data.table::rbindlist(list(NSSS,
 ClassyFire classifications can be queried from the ClassyFire API, but the InCHiKey is required. Get the InCHiKey for each DTXSID in the NSSS data, using the `ctxR` function `ctxR::get_chemical_details_batch()`.
 
 ```{r}
-chem_details <- ctxR::get_chemical_details_batch(DTXSID = NSSS$DTXSID)
+biosolids_curated <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
+                                        "Biosolids Master List",
+                                        "A1:D728")
+#remove extra blank row
+biosolids_curated <- biosolids_curated[2:nrow(biosolids_curated), ]
 
-#merge chemical details with NSSS info
-#keep only relevant columns from chemical details
-NSSS <- NSSS[chem_details[, .(dtxsid,
-                              inchikey)],
-              on = c("DTXSID" =  "dtxsid")
-]
+#also read in nutrients
+biosolids_curated2 <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
+                                        "Nutrients Detected in Biosolids",
+                                        "A1:D8")
+#remove extra blank row
+biosolids_curated2 <- biosolids_curated2[2:nrow(biosolids_curated2), ]
+
+biosolids_curated <- data.table::rbindlist(list(biosolids_curated,
+                                                biosolids_curated2),
+                                           use.names = FALSE)
+
+chem_details <- ctxR::get_chemical_details_batch(DTXSID = biosolids_curated$DTXSID)
 ```
 
 Source helper functions to query the ClassyFire API.
@@ -157,24 +167,24 @@ Source helper functions to query the ClassyFire API.
 source("classyfireAPIs.R")
 ```
 
-Because querying the ClassyFire API can be slow, we highly recommend only running this section once, and *saving* the result to re-load later. The ClassyFire API is limited to a maximum of 12 requests per minute; with 480 unique NSSS InCHiKeys, that translates to approximately 40 minutes. The results of the query have been pre-saved in the `data/` folder.
+Because querying the ClassyFire API can be slow, we highly recommend only running this section once, and *saving* the result to re-load later. The ClassyFire API is limited to a maximum of 12 requests per minute; with 727 unique InCHiKeys in the biosolids curated list, that translates to approximately 61 minutes. The results of the query have been pre-saved in the `data/` folder.
 
 ```{r, eval = FALSE}
 system.time(
-  chem_classes <- classify_inchikeys(inchikeys = NSSS[!is.na(inchikey),
+  chem_classes <- classify_inchikeys(inchikeys = chem_details[!is.na(inchikey),
                                                       unique(inchikey)])
 )
 
 chem_classes <- as.data.table(chem_classes)
 
 saveRDS(chem_classes,
-        "data/NSSS_ClassyFire.Rds")
+        "data/biosolids_curated_ClassyFire.Rds")
 ```
 
 Read in the saved ClassyFire classifications.
 
 ```{r}
-chem_classes <- readRDS("data/NSSS_ClassyFire.Rds")
+chem_classes <- readRDS("data/biosolids_curated_ClassyFire.Rds")
 ```
 
 # BST pre-loaded chemicals
@@ -182,9 +192,7 @@ chem_classes <- readRDS("data/NSSS_ClassyFire.Rds")
 Load a list of chemicals that are pre-loaded into the BST (these will be removed from analysis). These are identified by CASRN (but stripped of hyphens).
 
 ```{r}
-previously_loaded_casrns <- as.data.table(
-  readxl::read_excel(path = 'data/BST previously loaded CASRNs.xlsx')
-)
+previously_loaded_casrns <- data.table::fread("data/BST previously loaded CASRNs.csv")
 ```
 
 # List of CASRNs whose data is known to crash the BST
@@ -350,9 +358,9 @@ calc_koc <- function(DTXSID,
                            pH = pH)
   
     pKa_data <- get_pka(DTXSID = DTXSID)
-  
- 
     
+    if(length(pKa_data[[1]])> 0 &
+       length(pKa_data[[2]]) > 0){
     if(is.finite(pKa_data[[1]]) & 
        is.finite(pKa_data[[2]])){
        #If there is both a pKa_acidic and a pKa_basic,
@@ -375,6 +383,9 @@ calc_koc <- function(DTXSID,
       #if we don't have a pKa value, then use NaN
       #in this case it will be neutral and pKa will not be used anyway
       pKa <- NaN
+    }
+    }else{
+      pKa <- NA_real_
     }
   
   Koc <- NA_real_
@@ -554,12 +565,29 @@ generate_organic_entry <- function(DTXSID,
   # Get chemical details
   chemical_details <- ctxR::get_chemical_details(DTXSID = DTXSID)
   
+    if(length(chemical_details) == 0){
+    chemical_details <- list(casrn = NA_character_,
+                             preferredName = NA_character_,
+                             monoisotopicMass = NA_real_)
+  }
+  
   # Get chemical info
   chemical_info <- data.table(ctxR::get_chem_info(DTXSID = DTXSID))
   
-  if (length(chemical_details) == 0 || length(chemical_info) == 0){
-    return(NULL)
+    if(length(chemical_info) == 0){
+     chemical_info <-  as.data.table(
+     expand.grid(name = c('Molar Volume',
+                                         "Henry's Law",
+                                         'KOC',
+                                         'LogKow: Octanol-Water'
+                                         ),
+                                propType = c('predicted', 'experimental'),
+                                value = NA_real_,
+                                stringsAsFactors = FALSE)
+    )
   }
+  
+ 
   # Get chemical CAS
   chemical_cas <- chemical_details$casrn
   #strip hyphens
@@ -686,8 +714,8 @@ generate_organic_entry <- function(DTXSID,
   #if still missing, impute using SimpleTreat equation
   if (is.nan(chemical_koc)){
     if (!is.na(chemical_logkow)){
-      chemical_koc <- calc_koc(chemical_type = chemical_type,
-                               pK_data = get_pka(chemical_details$dtxsid),
+      chemical_koc <- calc_koc(DTXSID = DTXSID,
+                               pH = 7,
                                Kow = 10^chemical_logkow)
       chemical_koc_ref <- 190
       chemical_koc_notes <- 'koc method: https://www.rivm.nl/publicaties/simpletreat-40-a-model-to-predict-fate-and-emission-of-chemicals-in-wastewater'
@@ -1003,11 +1031,26 @@ generate_inorganic_entry <- function(DTXSID,
   # Get chemical details
   chemical_details <- ctxR::get_chemical_details(DTXSID = DTXSID)
   
+  if(length(chemical_details) == 0){
+    chemical_details <- list(casrn = NA_character_,
+                             preferredName = NA_character_,
+                             monoisotopicMass = NA_real_)
+  }
+  
   # Get chemical info
   chemical_info <- data.table(ctxR::get_chem_info(DTXSID = DTXSID))
   
-  if (length(chemical_details) == 0 || length(chemical_info) == 0){
-    return(NULL)
+  if(length(chemical_info) == 0){
+       chemical_info <- as.data.table(
+         expand.grid(name = c('Molar Volume',
+                                         "Henry's Law",
+                                         'KOC',
+                                         'LogKow: Octanol-Water'
+                                         ),
+                                propType = c('predicted', 'experimental'),
+                                value = NA_real_,
+                                stringsAsFactors = FALSE)
+       )
   }
   
   # Get chemical CAS
@@ -1457,7 +1500,7 @@ Check missing values for an organic template table entry:
 ```{r}
 #give it a sheet and it will tell you what is and is not missing
 organic_entry_missing_information <- function(organic_entry){
-  if (is.null(organic_entry)) return(NA_character_)
+ 
   if(!is.data.table(organic_entry)){
     organic_entry <- as.data.table(organic_entry)
   }
@@ -1481,7 +1524,6 @@ Check missing values for an inorganic template table entry:
 ```{r}
 inorganic_entry_missing_information <- function(inorganic_entry){
   
-  if (is.null(inorganic_entry)) return(NA_character_)
   
   if(!is.data.table(inorganic_entry)){
     inorganic_entry <- as.data.table(inorganic_entry)
@@ -1493,6 +1535,7 @@ inorganic_entry_missing_information <- function(inorganic_entry){
   }else{
     missing_data <- "no missing"
   }
+  
   return(missing_data)
 }
 ```
@@ -2080,7 +2123,9 @@ A good way to visualize the steps of the data filtering process, and how many ch
 ```{r}
 make_sankey <- function(filt_dt,
                         use_has_conc = TRUE,
-                        use_color = FALSE){
+                        use_color = FALSE,
+                        sankey_size = 3,
+                        x_title_size = NA_real_){
   
   #simplified "is DLC" check:
   #yes/no,
@@ -2095,8 +2140,62 @@ make_sankey <- function(filt_dt,
                                         "is DLC",
                                         "exclude"))]
   
+  filt_dt <-  filt_dt %>% 
+  #for readability, in case there is a long list of values missing or out of range --
+#drop the derived ones (Br[...], Bv, BCF_beef, BCF_milk)
+  mutate(missing_data = gsub(x = missing_data,
+                             pattern = "B[rv]\\w*(,\\s)?",
+                             replacement = "",
+                             perl = TRUE)) %>%
+  mutate(missing_data = gsub(x = missing_data,
+                             pattern = "BCF_((beef)|(milk))(,\\s)?",
+                             replacement = "",
+                             perl = TRUE)) %>%
+    mutate(missing_data = gsub(x = missing_data,
+                             pattern = "RCF(,\\s)?",
+                             replacement = "",
+                             perl = TRUE)) %>%
+    mutate(missing_data = gsub(x = missing_data,
+                               pattern = "LogKow",
+                               replacement = "Kow")) %>%
+    mutate(missing_data =gsub(
+                                               x = missing_data,
+                                               pattern = "Da, Dw",
+                                               replacement = "MV",
+                                               fixed = TRUE
+                                             )) %>%
+    #if it's more than 3 items, split it onto two lines
+    mutate(missing_data = if_else(sapply(strsplit(missing_data,
+                                                  split = ", "),
+                                         length) > 3,
+                                 
+                                           true = sapply(strsplit(missing_data,
+                                                  split = ", "),
+                                                  function(this_tmp){
+                                                paste0(
+                                                  paste(this_tmp[1:3],
+                                                      collapse = ", "),
+                                                    "\n",
+                                                    paste(this_tmp[4:(length(this_tmp))],
+                                                          collapse = ", ")
+                                                )
+                                                  }
+                                                ),
+                                  false = missing_data
+                                         
+                                  )) %>%
+  mutate(missing_data = factor(missing_data,
+                                      levels = c("preloaded",
+                                      "no missing",
+                                                 setdiff(unique(missing_data),
+                                                         c("no missing",
+                                                           "preloaded",
+                                                           "exclude")),
+                                                 "exclude")))
+  
   if(use_has_conc %in% TRUE){
-sankey_DT <- filt_dt %>% make_long(has_conc_data,
+sankey_DT <- filt_dt %>% 
+  make_long(has_conc_data,
                                    is_BST_preload,
                                    chemical_class,
                                    is_DLC2,
@@ -2106,6 +2205,8 @@ sankey_DT <- filt_dt %>% make_long(has_conc_data,
                                    bad_format,
                                    Bulk_Upload,
                                    is_run)
+
+
 
 lvls <- filt_dt[, Reduce(union,
                                             lapply(.SD, levels)),
@@ -2120,7 +2221,8 @@ lvls <- filt_dt[, Reduce(union,
                                                "Bulk_Upload",
                                                "is_run")]
   }else{
-  sankey_DT <- filt_dt %>% make_long(is_BST_preload,
+  sankey_DT <- filt_dt  %>% 
+    make_long(is_BST_preload,
                                    chemical_class,
                                    is_DLC2,
                                    missing_data,
@@ -2154,6 +2256,8 @@ sankey_DT <- sankey_DT %>%
                        levels = lvls),
          next_node = factor(next_node,
                             levels = lvls))
+
+
 
 if(use_color %in% TRUE){
   #set up color palette
@@ -2193,8 +2297,10 @@ if(use_color %in% FALSE){
     geom_sankey(fill = "gray70",
                 node.fill = "gray30") +
     geom_sankey_label(color = "black",
-                      fill = "white") +
-    geom_sankey_text(color = "black")
+                      fill = "white",
+                      size = sankey_size) 
+    # geom_sankey_text(color = "black",
+    #                  size = sankey_size)
 }else{
 this_plot <- ggplot(sankey_DT,
                       aes(x = x,
@@ -2204,8 +2310,10 @@ this_plot <- ggplot(sankey_DT,
                           fill = node,
                           label = node_label)) +
     geom_sankey() +
-    geom_sankey_label(color = "white") +
-    geom_sankey_text(color = "white") +
+    geom_sankey_label(color = "white",
+                      size = sankey_size) +
+    # geom_sankey_text(color = "white",
+    #                  size = sankey_size) +
     scale_fill_manual(values = cols)
 }
 
@@ -2214,7 +2322,8 @@ this_plot <- this_plot +
   theme_sankey() +
   theme(legend.position = "none",
         axis.text.x = element_text(angle = 45,
-                                   hjust = 1),
+                                   hjust = 1,
+                                   size =  x_title_size),
         axis.title.x = element_blank())
 
 return(this_plot)
@@ -2229,6 +2338,19 @@ return(this_plot)
 biosolids_curated <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
                                         "Biosolids Master List",
                                         "A1:D728")
+#remove extra blank row
+biosolids_curated <- biosolids_curated[2:nrow(biosolids_curated), ]
+
+#also read in nutrients
+biosolids_curated2 <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
+                                        "Nutrients Detected in Biosolids",
+                                        "A1:D8")
+#remove extra blank row
+biosolids_curated2 <- biosolids_curated2[2:nrow(biosolids_curated2), ]
+
+biosolids_curated <- data.table::rbindlist(list(biosolids_curated,
+                                                biosolids_curated2),
+                                           use.names = FALSE)
 
 all_entries1ppb <- generate_tbls(DTXSIDs = biosolids_curated$DTXSID,
                              which_conc = "1ppb")
@@ -2243,23 +2365,24 @@ prepared1ppb <- list('Notes' = bulkuploader_Notes,
                            'References' = bulkuploader_References,
                            'Data_Filtering' = all_entries1ppb$Data_Filtering)
 
-# Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared1ppb,
                     path = "results/curated1ppb.xlsx")
 
 my_plot1ppb <- make_sankey(filt_dt = all_entries1ppb$Data_Filtering,
                        use_has_conc = FALSE,
-                       use_color = FALSE)
+                       use_color = FALSE,
+                       sankey_size = 2.7,
+                       x_title_size = 8)
 
 ggsave( "results/BST_sankey_1ppb.pdf",
         my_plot1ppb,
-       height = 5,
+       height = 7,
        width = 9,
        units = "in")
 
 ggsave( "results/BST_sankey_1ppb.png",
         my_plot1ppb,
-       height = 5,
+       height = 7,
        width = 9,
        units = "in",
        dpi = 300)
@@ -2272,6 +2395,19 @@ ggsave( "results/BST_sankey_1ppb.png",
 biosolids_curated <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
                                         "Biosolids Master List",
                                         "A1:D728")
+#remove extra blank row
+biosolids_curated <- biosolids_curated[2:nrow(biosolids_curated), ]
+
+#also read in nutrients
+biosolids_curated2 <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
+                                        "Nutrients Detected in Biosolids",
+                                        "A1:D8")
+#remove extra blank row
+biosolids_curated2 <- biosolids_curated2[2:nrow(biosolids_curated2), ]
+
+biosolids_curated <- data.table::rbindlist(list(biosolids_curated,
+                                                biosolids_curated2),
+                                           use.names = FALSE)
 
 all_entries_mean <- generate_tbls(DTXSIDs = biosolids_curated$DTXSID,
                              which_conc = "mean")
@@ -2286,13 +2422,14 @@ prepared_mean <- list('Notes' = bulkuploader_Notes,
                            'References' = bulkuploader_References,
                            'Data_Filtering' = all_entries_mean$Data_Filtering)
 
-# Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared_mean,
                     path = "results/NSSSmean.xlsx")
 
  my_plot_mean <- make_sankey(filt_dt = all_entries_mean$Data_Filtering,
                        use_has_conc = TRUE,
-                       use_color = FALSE)
+                       use_color = FALSE,
+                       sankey_size = 3.5,
+                       x_title_size = 8)
 
 ggsave("results/BST_sankey_NSSSmean.pdf",
        my_plot_mean, 
@@ -2313,6 +2450,19 @@ ggsave("results/BST_sankey_NSSSmean.png",
 biosolids_curated <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
                                         "Biosolids Master List",
                                         "A1:D728")
+#remove extra blank row
+biosolids_curated <- biosolids_curated[2:nrow(biosolids_curated), ]
+
+#also read in nutrients
+biosolids_curated2 <- readxl::read_excel("data/Richman_et_al_2022_SI_Table1_Master List of Chemicals Detected in Biosolids.xlsx",
+                                        "Nutrients Detected in Biosolids",
+                                        "A1:D8")
+#remove extra blank row
+biosolids_curated2 <- biosolids_curated2[2:nrow(biosolids_curated2), ]
+
+biosolids_curated <- data.table::rbindlist(list(biosolids_curated,
+                                                biosolids_curated2),
+                                           use.names = FALSE)
 
 all_entries_95 <- generate_tbls(DTXSIDs = biosolids_curated$DTXSID,
                              which_conc = "95th")
@@ -2327,7 +2477,6 @@ prepared_95 <- list('Notes' = bulkuploader_Notes,
                            'References' = bulkuploader_References,
                            'Data_Filtering' = all_entries_95$Data_Filtering)
 
-#Uncomment the write line and specify your path name
 writexl::write_xlsx(x = prepared_95,
                     path = "results/NSSS95.xlsx")
 
@@ -2556,7 +2705,8 @@ Plot frequency polygons (like histograms) for the adult farmer ADDs, under the t
                 bins = 30,
                 linewidth = 1) +
     facet_grid(rows = vars(which_conc),
-               cols = vars(Scenario)) +
+               cols = vars(Scenario),
+               scales = "free_y") +
   scale_x_log10(guide = "axis_logticks") +
   xlab("BST-predicted total ingestion ADD (adult farmer), mg/kg/day") +
   theme_bw() +
@@ -2577,7 +2727,7 @@ ggsave(paste0("analysis/BST_ADD_freqpoly.png"),
        dpi = 300)
 ```
 
-Compare biosolids concentrations to adult farmer ADDs for each LAU scenario and each biosolids concentration scenario. Make plots and run linear regression (on a log10-log10 scale).
+Compare biosolids concentrations to adult farmer ADDs for each LAU scenario and each biosolids concentration scenario (excluding 1 ppb, since concentration is constant for that scenario). Make plots and run linear regression (on a log10-log10 scale).
 
 ```{r}
 #read in mapping between DTXSID and stripped CASRN
@@ -2590,6 +2740,7 @@ conc_tbl_list <- sapply(c("mean",
                      "p95",
                      "ppb"),
                    function(which_conc){
+                     print(which_conc)
                      if(which_conc %in% "mean"){
                        
                        this_tbl <- make_conc_tbl(which_conc = "mean") %>%
@@ -2603,10 +2754,10 @@ conc_tbl_list <- sapply(c("mean",
                          left_join(mapping) %>%
                          dplyr::rename(CAS = casrn_stripped) %>%
                          dplyr::mutate(CAS = as.numeric(CAS))
-                     }else{
+                     }else{ #if which_conc == "ppb"
                        this_tbl <- mapping %>%
-                         mutate(conc_mgkg = 1e-3) %>%
-                         rename(CAS = casrn_stripped)
+                         dplyr::mutate(conc_mgkg = 1e-3) %>%
+                         dplyr::rename(CAS = casrn_stripped)
                      }
                      
                      this_tbl <- this_tbl %>%
@@ -2633,7 +2784,12 @@ conc_tbl <- conc_tbl %>%
 #merge with ADD info
 df_conc <- df %>%
   dplyr::left_join(conc_tbl,
-                   relationship = "many-to-one")
+                   relationship = "many-to-one") %>%
+  dplyr::mutate(conc_mgkg = dplyr::if_else(which_conc %in% "ppb" &
+                                             is.na(conc_mgkg),
+                                           0.001,
+                                           conc_mgkg)
+                )
 
 #Regression of log10 ADD on log10 conc.
 df_lm <- df_conc %>%
@@ -2775,7 +2931,10 @@ df_rank <- df_conc %>%
  tidyr::pivot_wider(id_cols = c(DTXSID, CAS, which_conc, `Chemical Name`, conc_mgkg, conc_rank),
               names_from = Scenario,
               values_from = c(Adult_Farmer_ADD,
-                              Rank))
+                              Rank)) %>%
+  dplyr::mutate(conc_rank = dplyr::if_else(which_conc %in% "ppb",
+                                           NA_real_,
+                                           conc_rank))
 
   write.csv(df_rank, "analysis/ADD_rank.csv")
 ```
