@@ -1,5 +1,6 @@
 # autobst
-AutoBST workflow associated with the manuscript "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al., 2025).
+
+This repository contains files associated with the AutoBST workflow associated with the manuscript "A Cheminformatics Workflow for Higher-throughput Modeling of Chemical Exposures from Biosolids" (Kruse et al., 2025).
 
 The main script for autoBST is in the R Markdown document `BST BulkLoader Workflow Manuscript.Rmd`.
 
