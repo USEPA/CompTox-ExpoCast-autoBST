@@ -34,4 +34,4 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 #results of analysis
-analysis
+analysis/

@@ -782,7 +782,6 @@ generate_organic_entry <- function(DTXSID,
           ]
         )
       #if there's an ECOTOX value use it first; if not, proceed to OPERA
-      #per conversation between Paul and Sophie for precedence
       if (dim(bcf_fish_temp[modelSource %in% 'ECOTOX: aquatic',])[1] == 1){
         if (tr_fish_3_ref != 190){
           tr_fish_3 <- bcf_fish_temp[modelSource %in% 'ECOTOX: aquatic', Mean]
@@ -2244,11 +2243,18 @@ lvls <- filt_dt[, Reduce(union,
                                                "Bulk_Upload",
                                                "is_run")]
 }
-lvls <- c("preloaded",
-          setdiff(lvls,
-                  c("preloaded",
-                  "exclude")),
-          "exclude")
+  lvls <- c("preloaded",
+            "no missing",
+            "no high",
+            "no low",
+            setdiff(lvls,
+                    c("preloaded",
+                      "no missing",
+                      "no high",
+                      "no low",
+                      "exclude")),
+            "exclude")
+
 
 
 sankey_DT <- sankey_DT %>%
@@ -2481,8 +2487,10 @@ writexl::write_xlsx(x = prepared_95,
                     path = "results/NSSS95.xlsx")
 
  my_plot_95 <- make_sankey(filt_dt = all_entries_95$Data_Filtering,
-                       use_has_conc = TRUE,
-                       use_color = FALSE)
+                        use_has_conc = TRUE,
+                       use_color = FALSE,
+                       sankey_size = 3.5,
+                       x_title_size = 8)
 
 ggsave("results/BST_sankey_NSSS95th.pdf",
        my_plot_95, 
@@ -2694,6 +2702,29 @@ Read in all output data.
   df <- dplyr::bind_rows(df_list,
                          .id = "which_conc")
 ```
+
+Ensure any chemicals that should have been removed from the NSSS scenarios are removed.
+
+```{r}
+df <- df %>%
+  filter(!(which_conc %in% c("mean", "p95") &
+             `Chemical Name` %in% c(
+               "Chromium (III)",
+               "Chromium (VI)",
+               "Mercury (divalent)",
+               "Selenium (IV)",
+               "Selenium (VI)",
+               "Albuterol",
+               "Chlortetracycline",
+               "Oxolinic acid",
+               "PFOA",
+               "PFOS",
+               "Sulfathiazole"
+             )
+           )
+         )
+```
+
   
 Plot frequency polygons (like histograms) for the adult farmer ADDs, under the three LAU scenarios and the three biosolids concentration scenarios.
 
@@ -2706,7 +2737,7 @@ Plot frequency polygons (like histograms) for the adult farmer ADDs, under the t
                 linewidth = 1) +
     facet_grid(rows = vars(which_conc),
                cols = vars(Scenario),
-               scales = "free_y") +
+               scales = "free") +
   scale_x_log10(guide = "axis_logticks") +
   xlab("BST-predicted total ingestion ADD (adult farmer), mg/kg/day") +
   theme_bw() +
@@ -2726,6 +2757,16 @@ ggsave(paste0("analysis/BST_ADD_freqpoly.png"),
        units = "in",
        dpi = 300)
 ```
+
+Range of concentrations
+
+```{r}
+df %>%
+  group_by(which_conc, Scenario) %>%
+  summarise(min_ADD = min(Value, na.rm = TRUE),
+            max_ADD = max(Value, na.rm = TRUE))
+```
+
 
 Compare biosolids concentrations to adult farmer ADDs for each LAU scenario and each biosolids concentration scenario (excluding 1 ppb, since concentration is constant for that scenario). Make plots and run linear regression (on a log10-log10 scale).
 
@@ -2811,7 +2852,8 @@ df_lm <- df_lm %>%
 #plot ADD vs. concentration
 
 ggplot(df_conc %>%
-         filter(!(which_conc %in% "ppb")),
+         filter(!(which_conc %in% "ppb" &
+                    !is.na(Value))),
        aes(x = conc_mgkg,
                     y= Value)) +
   geom_point(shape = 21) +
